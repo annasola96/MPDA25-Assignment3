@@ -18,11 +18,15 @@ sp_idx = th.tree_to_list(cast(int, i))
 initial_vertices = m.Vertices
 
 length = []
+sp_idx_several = []
 
-#create a list composed of the lenghts of the lists in sp_idx
+#create a list composed of the lenghts of the lists in sp_idx and remove strips with only 1 face
 for i in range(len(sp_idx)):
     length.append(len(sp_idx[i]))
-
+    if len(sp_idx[i]) > 22:
+        sp_idx_several.append(sp_idx[i])
+    else:
+        pass
 
 
 remap_length = []
@@ -34,21 +38,15 @@ for i in range(len(length)):
 
 #create a list of lists of faces of the mesh m according to the indices of sp_idx
 sp_faces_lists = []
-for i in range(len(sp_idx)):
+for i in range(len(sp_idx_several)):
     sp_faces=[]
-    for j in range(len(sp_idx[i])):
-        sp_faces.append(m.Faces[sp_idx[i][j]])
+    for j in range(len(sp_idx_several[i])):
+        sp_faces.append(m.Faces[sp_idx_several[i][j]])
     sp_faces_lists.append(sp_faces)
 
 
-sp_faces_lists_gh = th.list_to_tree(sp_faces_lists)
-
-
-# Create a list to store the strips (welded meshes)
-strips = []
-breps = []
-unrolled_strips = []
-unrolled_vertices = []
+# Create a list to store the unrolled strips (faces)
+unrolled_strips_unjoined = []
 
 for faces in sp_faces_lists:
     # Create a new mesh
@@ -59,49 +57,57 @@ for faces in sp_faces_lists:
     
     # Add each face to the mesh
     for face in faces:
-            # Add the face to the mesh
-            mesh_strip.Faces.AddFace(face.A, face.B, face.C)
-    
-    #cull unused vertices of the mesh
-    #mesh_strip.CullUnusedVertices()
+        # Add the face to the mesh
+        mesh_strip.Faces.AddFace(face.A, face.B, face.C)
     
     brep_strip = rg.Brep.CreateFromMesh(mesh_strip, True)
     unrolled = rg.Unroller(brep_strip)
 
     # Perform the unrolling
     unrolled_breps, unrolled_curves, unrolled_points, unrolled_dots = unrolled.PerformUnroll()
-    joined_brep = rg.Brep.JoinBreps(unrolled_breps, 0.1)
-    
-    # Append the welded mesh to the list
-    strips.append(mesh_strip)
-    breps.append(brep_strip)
-    unrolled_strips.extend(joined_brep)
-
-    for brep in joined_brep:
-        vertices = []
-        for vertex in brep.Vertices:
-            point = vertex.Location
-            vertices.append(point)
-        unrolled_vertices.append(vertices)
-
-# Convert the list of lists to a Grasshopper data tree
-unrolled_vertices_gh = th.list_to_tree(unrolled_vertices)
+    unrolled_strips_unjoined.append(unrolled_breps)
 
 
+centers_lists = []
 
-#fitted_lines = []
+for strip in unrolled_strips_unjoined:
+    centers = []
+    for face in strip:
+        amp = rg.AreaMassProperties.Compute(face)
+        centers.append(amp.Centroid)
+    centers_lists.append(centers)
 
-#for pts in unrolled_vertices:
-    # Use Rhino's Line.TryFitLineToPoints method to fit a line
-    #success, line = rg.Line.TryFitLineToPoints(pts, 0.01)  # Tolerance can be adjusted
-    #if success:
-    #    fitted_lines.append(line)
-    #else:
-    #    fitted_lines.append(None)  # Handle the failure case as needed
+straightlines = []
+#For each list of points of centers_lists, do a line from the first point to the last point
+for centers in centers_lists:
+    line = rg.Line(centers[0], centers[-1])
+    straightlines.append(line)
 
-#for vertices in unrolled_vertices:
-#    success, line = rg.Line.TryFitLineToPoints(vertices, 0.01)
-#    if success:
-#        fitted_lines.append(line)
-#    else:
-#        fitted_lines.append(None)  # Or handle the failure case as needed
+avrg_distance = []
+
+#For each point of each list of centers_lists, calculate the distance to the corresponding line of straightlines
+for i in range(len(centers_lists)):
+    distance_add = 0
+    for j in range(len(centers_lists[i])):
+        distance = straightlines[i].DistanceTo(centers_lists[i][j],True)
+        distance_add += distance
+    avrg_distance.append(distance_add / len(centers_lists[i]))
+
+remap_avrg_distance = [0]
+
+#remap the numbers of the list named avrg_distance from a domain from its minimum to its maximum to a domain from 0 to 50, and append the results in remap_avg_distance
+for i in range(len(avrg_distance)):
+    remap_num = (avrg_distance[i] - min(avrg_distance)) / (max(avrg_distance) - min(avrg_distance)) * 50
+    remap_num = 50 - remap_num
+    remap_avrg_distance.append(remap_num)
+
+
+grade=[]
+
+for i in range(len(remap_avrg_distance)):
+    grade.append(remap_avrg_distance[i]+remap_length[i])
+
+#get the index of the maximum number in grade
+max_index = grade.index(max(grade))
+
+chosen_path = sp_idx_several[max_index]
